@@ -2,3 +2,4 @@
 *.sops.yaml
 secrets.enc.yaml
 .DS_Store
+.github/
