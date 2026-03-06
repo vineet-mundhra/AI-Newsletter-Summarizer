@@ -1,1 +1,100 @@
-
+{
+  "name": "V3 Newsletter → AI Score → Digest Store",
+  "nodes": [
+    {
+      "parameters": {
+        "labelIds": ["AI_SUMMARIZE"],
+        "format": "resolved"
+      },
+      "id": "gmail_trigger",
+      "name": "Gmail Trigger",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1,
+      "position": [200, 400],
+      "credentials": {
+        "gmailOAuth2": { "name": "Gmail OAuth2" }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "const data = this.getWorkflowStaticData('global');\nif (!data.processed) data.processed = [];\nif (data.processed.includes($json.id)) return [];\ndata.processed.push($json.id);\nreturn [$json];"
+      },
+      "id": "dedupe",
+      "name": "Deduplicate",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [400, 400]
+    },
+    {
+      "parameters": {
+        "functionCode": "const html = $json.textHtml || '';\nlet text = html\n  .replace(/<style[^>]*>[\\s\\S]*?<\\/style>/gi, '')\n  .replace(/<script[^>]*>[\\s\\S]*?<\\/script>/gi, '')\n  .replace(/<[^>]+>/g, '')\n  .replace(/\\s+/g, ' ')\n  .trim();\n\nif (text.length < 500) return [];\nif (text.length > 20000) return [];\n\ntext = text.substring(0, 8000);\ntext = text.split(' ').slice(0, 1200).join(' ');\n\nreturn [{ clean_text: text, id: $json.id }];"
+      },
+      "id": "clean_trim",
+      "name": "Clean + Trim",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [600, 400]
+    },
+    {
+      "parameters": {
+        "functionCode": "const text = $json.clean_text.toLowerCase();\nlet score = 0;\nif (text.includes('funding')) score += 2;\nif (text.includes('acquisition')) score += 2;\nif (text.includes('launch')) score += 2;\nif (text.includes('regulation')) score += 2;\nif (text.includes('ai')) score += 1;\nif (text.match(/\\$\\d+/)) score += 1;\nif (score < 2) return [];\nreturn [$json];"
+      },
+      "id": "heuristic",
+      "name": "Heuristic Filter",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [800, 400]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o-mini",
+        "messages": [
+          {
+            "role": "user",
+            "content": "Return JSON only.\n\n{\n  \"score\": number (1-10),\n  \"summary\": \"max 120 words, concise\"\n}\n\nScoring:\n9-10 major impact\n7-8 important\n5-6 minor\n<5 low signal\n\nIgnore ads.\n\nNewsletter:\n{{$json.clean_text}}"
+          }
+        ],
+        "options": {
+          "temperature": 0.2,
+          "maxTokens": 300,
+          "timeout": 60000
+        }
+      },
+      "id": "openai",
+      "name": "OpenAI Score + Summary",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 3,
+      "position": [1000, 400],
+      "credentials": {
+        "openAiApi": { "name": "OpenAI API" }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "const content = $json.choices[0].message.content;\nlet parsed;\ntry {\n  parsed = JSON.parse(content);\n} catch (e) {\n  return [];\n}\n\nif (parsed.score < 7) return [];\n\nconst data = this.getWorkflowStaticData('global');\nif (!data.digest) data.digest = [];\nif (!data.tokens) data.tokens = { in:0, out:0, exec:0 };\n\n// Track tokens\ndata.tokens.in += $json.usage?.prompt_tokens || 0;\ndata.tokens.out += $json.usage?.completion_tokens || 0;\ndata.tokens.exec += 1;\n\nconst formatted = `Score: ${parsed.score}/10\\n\\n${parsed.summary}`;\n\ndata.digest.push(formatted);\n\nreturn [{ stored:true }];"
+      },
+      "id": "store_digest",
+      "name": "Store High-Signal Summary",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1200, 400]
+    }
+  ],
+  "connections": {
+    "gmail_trigger": {
+      "main": [[{ "node": "dedupe", "type": "main", "index": 0 }]]
+    },
+    "dedupe": {
+      "main": [[{ "node": "clean_trim", "type": "main", "index": 0 }]]
+    },
+    "clean_trim": {
+      "main": [[{ "node": "heuristic", "type": "main", "index": 0 }]]
+    },
+    "heuristic": {
+      "main": [[{ "node": "openai", "type": "main", "index": 0 }]]
+    },
+    "openai": {
+      "main": [[{ "node": "store_digest", "type": "main", "index": 0 }]]
+    }
+  }
+}
