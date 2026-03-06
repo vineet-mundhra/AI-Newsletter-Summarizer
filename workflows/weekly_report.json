@@ -1,1 +1,59 @@
-
+{
+  "name": "V3 Weekly Analytics Report",
+  "nodes": [
+    {
+      "parameters": {
+        "triggerTimes": {
+          "item": [
+            {
+              "mode": "everyWeek",
+              "weekday": 0,
+              "hour": 18,
+              "minute": 0
+            }
+          ]
+        }
+      },
+      "id": "cron",
+      "name": "Sunday 6PM Trigger",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [300, 400]
+    },
+    {
+      "parameters": {
+        "functionCode": "const data = this.getWorkflowStaticData('global');\nif (!data.tokens) return [];\n\nconst input = data.tokens.in || 0;\nconst output = data.tokens.out || 0;\nconst exec = data.tokens.exec || 0;\n\nconst cost = ((input / 1000000) * 0.15 + (output / 1000000) * 0.60).toFixed(2);\n\nconst message = `Weekly AI Newsletter Report\\n\\nProcessed: ${exec}\\nInput Tokens: ${input}\\nOutput Tokens: ${output}\\nEstimated Cost: $${cost}`;\n\nreturn [{ message }];"
+      },
+      "id": "build_report",
+      "name": "Build Report",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [500, 400]
+    },
+    {
+      "parameters": {
+        "url": "https://graph.facebook.com/v18.0/YOUR_PHONE_NUMBER_ID/messages",
+        "method": "POST",
+        "authentication": "predefinedCredentialType",
+        "sendBody": true,
+        "bodyParametersJson": "={\n  \"messaging_product\": \"whatsapp\",\n  \"to\": \"YOUR_PHONE_NUMBER\",\n  \"type\": \"text\",\n  \"text\": {\n    \"body\": $json.message\n  }\n}"
+      },
+      "id": "whatsapp",
+      "name": "Send Weekly Report",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [700, 400],
+      "credentials": {
+        "httpHeaderAuth": { "name": "WhatsAppToken" }
+      }
+    }
+  ],
+  "connections": {
+    "cron": {
+      "main": [[{ "node": "build_report", "type": "main", "index": 0 }]]
+    },
+    "build_report": {
+      "main": [[{ "node": "whatsapp", "type": "main", "index": 0 }]]
+    }
+  }
+}
